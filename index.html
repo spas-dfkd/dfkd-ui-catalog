@@ -466,13 +466,18 @@ function renderCategory(slug) {
   var mainCount = currentEntries.filter(function(e) { return e.type === 'main'; }).length;
   var popupCount = currentEntries.length - mainCount;
 
-  // 그룹별 분류
+  // 그룹별 분류 (main 포함 그룹을 앞으로)
   var groups = {};
   var groupOrder = [];
   currentEntries.forEach(function(e) {
     var g = e.group || '기타';
     if (!groups[g]) { groups[g] = []; groupOrder.push(g); }
     groups[g].push(e);
+  });
+  groupOrder.sort(function(a, b) {
+    var aMain = groups[a].some(function(e) { return e.type === 'main'; }) ? 0 : 1;
+    var bMain = groups[b].some(function(e) { return e.type === 'main'; }) ? 0 : 1;
+    return aMain - bMain;
   });
 
   document.getElementById('cat-sub').textContent =
