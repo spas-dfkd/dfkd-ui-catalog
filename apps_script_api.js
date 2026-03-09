@@ -83,11 +83,20 @@ function sheetToObjects(sheetName) {
 }
 
 // ────────────────────────────────────────
-// POST: 상태 업데이트
+// POST: 상태 업데이트 + 이미지 업로드
 // ────────────────────────────────────────
+var SCREENSHOT_FOLDER_NAME = 'DFKD-UI-Screenshots';
+
 function doPost(e) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('상태관리');
   var data = JSON.parse(e.postData.contents);
+
+  // 이미지 업로드 액션
+  if (data.action === 'uploadImage') {
+    return handleImageUpload(data);
+  }
+
+  // 기존 상태 업데이트
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('상태관리');
 
   if (!data['UI이름']) {
     return ContentService.createTextOutput(JSON.stringify({ ok: false, error: 'UI이름 필수' }))
@@ -122,4 +131,69 @@ function doPost(e) {
 
   return ContentService.createTextOutput(JSON.stringify({ ok: true, 'UI이름': data['UI이름'] }))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+// ────────────────────────────────────────
+// 이미지 업로드 → Drive 저장 → 시트 반영
+// ────────────────────────────────────────
+function handleImageUpload(data) {
+  try {
+    if (!data['UI이름'] || !data.imageData) {
+      return ContentService.createTextOutput(JSON.stringify({ ok: false, error: 'UI이름과 imageData 필수' }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // Drive 폴더 찾기 또는 생성
+    var folder = getOrCreateFolder(SCREENSHOT_FOLDER_NAME);
+
+    // 파일명 생성: UIType_날짜시간.png
+    var now = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyyMMdd_HHmmss');
+    var ext = (data.mimeType || 'image/png').split('/')[1] || 'png';
+    var fileName = data['UI이름'] + '_' + now + '.' + ext;
+
+    // base64 → Blob → Drive 파일 생성
+    var decoded = Utilities.base64Decode(data.imageData);
+    var blob = Utilities.newBlob(decoded, data.mimeType || 'image/png', fileName);
+    var file = folder.createFile(blob);
+
+    // 누구나 볼 수 있도록 공유 설정
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+    var driveUrl = 'https://drive.google.com/file/d/' + file.getId() + '/view';
+
+    // 시트에 스크린샷 URL 자동 반영
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('상태관리');
+    var values = sheet.getRange('A:A').getValues();
+    for (var i = 1; i < values.length; i++) {
+      if (values[i][0] === data['UI이름']) {
+        var rowIdx = i + 1;
+        sheet.getRange(rowIdx, 10).setValue(driveUrl); // 스크린샷URL 컬럼
+        var today = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd');
+        sheet.getRange(rowIdx, 8).setValue(today); // 수정일
+        break;
+      }
+    }
+
+    // 캐시 무효화
+    CacheService.getScriptCache().remove('api_all');
+
+    return ContentService.createTextOutput(JSON.stringify({
+      ok: true,
+      driveUrl: driveUrl,
+      fileId: file.getId(),
+      fileName: fileName
+    })).setMimeType(ContentService.MimeType.JSON);
+
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({
+      ok: false,
+      error: err.message || String(err)
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function getOrCreateFolder(folderName) {
+  var folders = DriveApp.getFoldersByName(folderName);
+  if (folders.hasNext()) return folders.next();
+  return DriveApp.createFolder(folderName);
 }

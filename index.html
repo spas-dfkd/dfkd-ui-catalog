@@ -209,6 +209,84 @@ body { font-family:'Pretendard',-apple-system,'Segoe UI',sans-serif; background:
 }
 .refresh-btn:hover { border-color:var(--accent); color:var(--accent); }
 .refresh-btn.spinning { animation:spin .6s linear infinite; pointer-events:none; }
+
+/* 검색 */
+.search-box {
+  position:relative; margin-bottom:20px;
+}
+.search-input {
+  width:100%; padding:12px 16px 12px 40px; font-size:14px;
+  background:var(--surface); border:1px solid var(--border); border-radius:10px;
+  color:var(--text); outline:none; font-family:inherit;
+}
+.search-input:focus { border-color:var(--accent); }
+.search-input::placeholder { color:var(--dim); }
+.search-icon {
+  position:absolute; left:14px; top:50%; transform:translateY(-50%);
+  color:var(--dim); font-size:14px; pointer-events:none;
+}
+.search-clear {
+  position:absolute; right:12px; top:50%; transform:translateY(-50%);
+  background:none; border:none; color:var(--dim); font-size:16px; cursor:pointer;
+  display:none;
+}
+.search-clear:hover { color:var(--text); }
+.search-results {
+  position:absolute; top:calc(100% + 4px); left:0; right:0;
+  background:var(--surface); border:1px solid var(--border); border-radius:10px;
+  max-height:400px; overflow-y:auto; z-index:150;
+  box-shadow:0 8px 32px #00000066; display:none;
+}
+.search-results.open { display:block; }
+.search-item {
+  display:flex; align-items:center; gap:10px;
+  padding:10px 16px; cursor:pointer; border-bottom:1px solid var(--border);
+  transition:background .1s;
+}
+.search-item:last-child { border-bottom:none; }
+.search-item:hover { background:var(--surface2); }
+.search-item-name { font-size:13px; font-weight:600; }
+.search-item-sub { font-size:11px; color:var(--dim); }
+.search-item-type {
+  font-size:9px; font-weight:700; padding:2px 6px; border-radius:4px; flex-shrink:0;
+}
+.search-item-type.main { background:var(--main-color); color:#fff; }
+.search-item-type.popup { background:#30363d; color:var(--dim); }
+.search-empty { padding:20px; text-align:center; color:var(--dim); font-size:12px; }
+
+/* 완성도 대시보드 */
+.completeness-bar {
+  display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap;
+}
+.completeness-item {
+  padding:10px 16px; background:var(--surface); border:1px solid var(--border);
+  border-radius:8px; flex:1; min-width:140px;
+}
+.completeness-item .cl-label { font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:.5px; font-weight:600; margin-bottom:4px; }
+.completeness-item .cl-bar {
+  height:4px; background:var(--surface2); border-radius:2px; overflow:hidden; margin-bottom:4px;
+}
+.completeness-item .cl-fill { height:100%; border-radius:2px; transition:width .3s; }
+.completeness-item .cl-text { font-size:11px; color:var(--text); font-weight:600; }
+
+/* 이미지 붙여넣기 영역 */
+.paste-zone {
+  border:2px dashed var(--border); border-radius:10px; padding:20px;
+  text-align:center; color:var(--dim); font-size:12px; cursor:pointer;
+  transition:all .2s; margin-top:8px;
+}
+.paste-zone:hover, .paste-zone.dragover { border-color:var(--accent); color:var(--accent); }
+.paste-zone.uploading { border-color:var(--orange); color:var(--orange); pointer-events:none; }
+.paste-preview { margin-top:8px; max-height:200px; border-radius:8px; }
+.paste-preview img { max-width:100%; max-height:200px; border-radius:8px; }
+
+/* 이미지 뷰어 모달 */
+.img-viewer-overlay {
+  display:none; position:fixed; inset:0; background:#000000dd; z-index:300;
+  justify-content:center; align-items:center; cursor:zoom-out;
+}
+.img-viewer-overlay.open { display:flex; }
+.img-viewer-overlay img { max-width:90vw; max-height:90vh; border-radius:8px; }
 </style>
 </head>
 <body>
@@ -222,6 +300,13 @@ body { font-family:'Pretendard',-apple-system,'Segoe UI',sans-serif; background:
       <h1 style="display:flex;align-items:center;gap:10px;">DFKD UI 카탈로그 <button class="refresh-btn" onclick="forceRefresh()" title="데이터 새로고침">&#8635;</button></h1>
       <div class="sub" id="sub-info"><span class="loading-spinner"></span>데이터 불러오는 중...</div>
     </div>
+    <div class="search-box" id="search-box">
+      <span class="search-icon">&#128269;</span>
+      <input class="search-input" id="search-input" type="text" placeholder="UI 이름, uiType, 프리팹 검색..." autocomplete="off">
+      <button class="search-clear" id="search-clear" onclick="clearSearch()">&#10005;</button>
+      <div class="search-results" id="search-results"></div>
+    </div>
+    <div class="completeness-bar" id="completeness"></div>
     <div class="l0-stats" id="stats"></div>
     <div class="cat-grid" id="grid"></div>
   </div>
@@ -252,6 +337,11 @@ body { font-family:'Pretendard',-apple-system,'Segoe UI',sans-serif; background:
     <button class="modal-close" onclick="closeModal()">&#10005;</button>
     <div class="modal-body" id="modal-body"></div>
   </div>
+</div>
+
+<!-- 이미지 뷰어 (스크린샷 확대) -->
+<div class="img-viewer-overlay" id="img-viewer" onclick="this.classList.remove('open')">
+  <img id="img-viewer-src" src="">
 </div>
 
 <script>
@@ -299,6 +389,125 @@ async function loadAllData() {
 }
 
 // ══════════════════════════════════════
+// 검색
+// ══════════════════════════════════════
+(function() {
+  var input = document.getElementById('search-input');
+  var results = document.getElementById('search-results');
+  var clearBtn = document.getElementById('search-clear');
+  var debounceTimer = null;
+
+  input.addEventListener('input', function() {
+    clearTimeout(debounceTimer);
+    clearBtn.style.display = input.value ? 'block' : 'none';
+    debounceTimer = setTimeout(doSearch, 150);
+  });
+
+  input.addEventListener('focus', function() {
+    if (input.value && results.childNodes.length) results.classList.add('open');
+  });
+
+  document.addEventListener('click', function(e) {
+    if (!document.getElementById('search-box').contains(e.target)) results.classList.remove('open');
+  });
+
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') { results.classList.remove('open'); input.blur(); }
+  });
+})();
+
+function doSearch() {
+  var input = document.getElementById('search-input');
+  var results = document.getElementById('search-results');
+  var q = input.value.trim().toLowerCase();
+
+  if (!q || !DATA.loaded) {
+    results.classList.remove('open');
+    return;
+  }
+
+  var matched = DATA.entries.filter(function(e) {
+    return (e.nameKR && e.nameKR.toLowerCase().indexOf(q) !== -1) ||
+           (e.uiType && e.uiType.toLowerCase().indexOf(q) !== -1) ||
+           (e.prefab && e.prefab.toLowerCase().indexOf(q) !== -1) ||
+           (e.descKR && e.descKR.toLowerCase().indexOf(q) !== -1) ||
+           (e.group && e.group.toLowerCase().indexOf(q) !== -1);
+  }).slice(0, 20);
+
+  if (!matched.length) {
+    results.innerHTML = '<div class="search-empty">검색 결과가 없습니다</div>';
+    results.classList.add('open');
+    return;
+  }
+
+  var html = '';
+  matched.forEach(function(e) {
+    var catInfo = DATA.categories.find(function(c) { return c.slug === e.slug; });
+    var catName = catInfo ? catInfo.category : e.slug;
+    var isMain = e.type === 'main';
+    html += '<div class="search-item" onclick="goToEntry(\'' + escHtml(e.slug) + '\',\'' + escHtml(e.uiType) + '\')">';
+    html += '<span class="search-item-type ' + (isMain ? 'main' : 'popup') + '">' + (isMain ? '메인' : '팝업') + '</span>';
+    html += '<div style="flex:1;min-width:0;">';
+    html += '<div class="search-item-name">' + escHtml(e.nameKR || e.uiType) + '</div>';
+    html += '<div class="search-item-sub">' + escHtml(catName) + ' · ' + escHtml(e.group || '') + ' · ' + escHtml(e.uiType) + '</div>';
+    html += '</div></div>';
+  });
+  results.innerHTML = html;
+  results.classList.add('open');
+}
+
+function clearSearch() {
+  var input = document.getElementById('search-input');
+  input.value = '';
+  document.getElementById('search-clear').style.display = 'none';
+  document.getElementById('search-results').classList.remove('open');
+  input.focus();
+}
+
+// 검색 결과 클릭 → 해당 카테고리로 이동 후 모달 열기
+var pendingModalUiType = null;
+function goToEntry(slug, uiType) {
+  document.getElementById('search-results').classList.remove('open');
+  pendingModalUiType = uiType;
+  navigateTo(slug);
+}
+
+// ══════════════════════════════════════
+// 완성도 대시보드
+// ══════════════════════════════════════
+function renderCompleteness() {
+  if (!DATA.loaded) return;
+  var total = DATA.entries.length;
+  if (!total) return;
+
+  var nameCount = 0, ssCount = 0, statusCount = 0, descCount = 0;
+  DATA.entries.forEach(function(e) {
+    if (e.nameKR && String(e.nameKR).trim()) nameCount++;
+    if (e.descKR && String(e.descKR).trim()) descCount++;
+    var si = DATA.statuses[e.uiType];
+    if (si) {
+      if (si['스크린샷URL'] && String(si['스크린샷URL']).trim()) ssCount++;
+      if (si['상태'] && String(si['상태']).trim()) statusCount++;
+    }
+  });
+
+  function bar(label, count, color) {
+    var pct = Math.round(count / total * 100);
+    return '<div class="completeness-item">' +
+      '<div class="cl-label">' + label + '</div>' +
+      '<div class="cl-bar"><div class="cl-fill" style="width:' + pct + '%;background:' + color + '"></div></div>' +
+      '<div class="cl-text">' + count + '/' + total + ' (' + pct + '%)</div>' +
+      '</div>';
+  }
+
+  document.getElementById('completeness').innerHTML =
+    bar('한국어 이름', nameCount, 'var(--accent)') +
+    bar('설명', descCount, 'var(--purple)') +
+    bar('스크린샷', ssCount, 'var(--cyan)') +
+    bar('상태 설정', statusCount, 'var(--orange)');
+}
+
+// ══════════════════════════════════════
 // SPA 라우터
 // ══════════════════════════════════════
 function navigateTo(page, pushState) {
@@ -328,6 +537,11 @@ window.addEventListener('popstate', function(e) {
 function getPageFromUrl() {
   var params = new URLSearchParams(window.location.search);
   return params.get('page') || 'index';
+}
+
+function getUiTypeFromUrl() {
+  var params = new URLSearchParams(window.location.search);
+  return params.get('ui') || null;
 }
 
 // ══════════════════════════════════════
@@ -396,6 +610,8 @@ function getTotalStatusCounts() {
 // ══════════════════════════════════════
 function renderIndex() {
   if (!DATA.loaded) return;
+
+  renderCompleteness();
 
   var cats = DATA.categories;
   if (!cats.length) {
@@ -533,6 +749,16 @@ function renderCategory(slug) {
 
   document.getElementById('content').innerHTML = html;
   updateStatusCounts();
+
+  // 딥링크 또는 검색에서 온 경우 모달 자동 열기
+  var targetUi = pendingModalUiType || getUiTypeFromUrl();
+  if (targetUi) {
+    pendingModalUiType = null;
+    var card = document.querySelector('.card[data-uitype="' + targetUi + '"]');
+    if (card) {
+      setTimeout(function() { openModal(card); }, 100);
+    }
+  }
 }
 
 function updateStatusCounts() {
@@ -590,8 +816,13 @@ function openModal(cardEl) {
     statusHtml = ' <span class="status-badge ' + sm.cls + '" style="position:static;display:inline-block;">' + sm.label + '</span>';
   }
 
+  // 딥링크 URL 생성
+  var deepLink = location.origin + location.pathname + '?page=' + encodeURIComponent(entry.slug) + '&ui=' + encodeURIComponent(uitype);
+
   var h = '<div class="modal-header">';
-  h += '<div class="modal-title">' + escHtml(entry.nameKR) + ' ' + typeLabel + statusHtml + '</div>';
+  h += '<div class="modal-title">' + escHtml(entry.nameKR) + ' ' + typeLabel + statusHtml;
+  h += ' <button onclick="copyDeepLink(\'' + escHtml(deepLink.replace(/'/g, "\\'")) + '\')" title="이 UI 링크 복사" style="background:none;border:1px solid var(--border);color:var(--dim);font-size:12px;padding:2px 8px;border-radius:4px;cursor:pointer;">&#128279;</button>';
+  h += '</div>';
   h += '<div class="modal-desc">' + escHtml(entry.descKR) + '</div>';
   if (statusInfo && statusInfo['메모']) {
     h += '<div style="margin-top:8px;padding:8px 12px;background:#f8514915;border:1px solid #f8514933;border-radius:6px;font-size:12px;color:var(--status-red);">';
@@ -603,10 +834,15 @@ function openModal(cardEl) {
   var ssUrl = statusInfo ? driveThumbUrl(statusInfo['스크린샷URL'], 800) : '';
   h += '<div class="modal-screenshot">';
   if (ssUrl) {
-    h += '<img src="' + escHtml(ssUrl) + '" onerror="this.parentElement.innerHTML=\'<div class=no-img>이미지를 불러올 수 없습니다</div>\'">';
+    h += '<img src="' + escHtml(ssUrl) + '" style="cursor:zoom-in" onclick="viewImage(this.src)" onerror="this.parentElement.innerHTML=\'<div class=no-img>이미지를 불러올 수 없습니다</div>\'">';
   } else {
-    h += '<div class="no-img">스크린샷이 등록되지 않았습니다.<br><span style="font-size:11px;color:var(--accent)">상태관리 시트의 스크린샷URL 컬럼에 Google Drive 링크를 입력하세요.</span></div>';
+    h += '<div class="no-img">스크린샷이 등록되지 않았습니다.</div>';
   }
+  h += '</div>';
+  // 스크린샷 붙여넣기
+  h += '<div class="paste-zone" id="paste-zone" data-uitype="' + escHtml(uitype) + '" data-field="screenshot">';
+  h += '&#128247; Ctrl+V로 스크린샷 붙여넣기 (클립보드 이미지 자동 업로드)';
+  h += '<div class="paste-preview" id="paste-preview"></div>';
   h += '</div>';
 
   h += '<div class="modal-meta">';
@@ -664,10 +900,139 @@ function openModal(cardEl) {
   document.getElementById('modal-body').innerHTML = h;
   document.getElementById('modal').classList.add('open');
   document.body.style.overflow = 'hidden';
+
+  // paste 이벤트 등록
+  setupPasteHandler(uitype);
 }
 
-function closeModal() { document.getElementById('modal').classList.remove('open'); document.body.style.overflow = ''; }
-document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeModal(); });
+function closeModal() {
+  document.getElementById('modal').classList.remove('open');
+  document.body.style.overflow = '';
+  document.getElementById('img-viewer').classList.remove('open');
+}
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    var viewer = document.getElementById('img-viewer');
+    if (viewer.classList.contains('open')) { viewer.classList.remove('open'); return; }
+    closeModal();
+  }
+});
+
+// 이미지 확대 뷰어
+function viewImage(src) {
+  document.getElementById('img-viewer-src').src = src;
+  document.getElementById('img-viewer').classList.add('open');
+}
+
+// 딥링크 복사
+function copyDeepLink(url) {
+  navigator.clipboard.writeText(url).then(function() {
+    var btn = event.target;
+    var orig = btn.innerHTML;
+    btn.innerHTML = '&#10003; 복사됨';
+    setTimeout(function() { btn.innerHTML = orig; }, 1500);
+  });
+}
+
+// 스크린샷 붙여넣기
+function setupPasteHandler(uitype) {
+  var zone = document.getElementById('paste-zone');
+  if (!zone) return;
+
+  // Ctrl+V 이벤트 (모달이 열려있을 때)
+  var handler = function(e) {
+    if (!document.getElementById('modal').classList.contains('open')) return;
+    var items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        e.preventDefault();
+        var blob = items[i].getAsFile();
+        handleImageUpload(blob, uitype);
+        return;
+      }
+    }
+  };
+  // 이전 핸들러 제거 후 새로 등록
+  if (window._pasteHandler) document.removeEventListener('paste', window._pasteHandler);
+  window._pasteHandler = handler;
+  document.addEventListener('paste', handler);
+}
+
+async function handleImageUpload(blob, uitype) {
+  var zone = document.getElementById('paste-zone');
+  var preview = document.getElementById('paste-preview');
+
+  // 미리보기 표시
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    preview.innerHTML = '<img src="' + e.target.result + '">';
+  };
+  reader.readAsDataURL(blob);
+
+  zone.classList.add('uploading');
+  zone.textContent = '업로드 중...';
+  zone.appendChild(preview);
+
+  try {
+    // base64로 변환
+    var base64 = await blobToBase64(blob);
+
+    // Apps Script로 전송
+    var payload = {
+      action: 'uploadImage',
+      'UI이름': uitype,
+      imageData: base64,
+      mimeType: blob.type || 'image/png',
+      field: 'screenshot'
+    };
+
+    var res = await fetch(API_URL, { method: 'POST', body: JSON.stringify(payload) });
+    var result = await res.json();
+
+    if (result.ok && result.driveUrl) {
+      zone.classList.remove('uploading');
+      zone.innerHTML = '&#10003; 업로드 완료! Drive에 저장됨';
+      zone.style.borderColor = 'var(--green)';
+      zone.style.color = 'var(--green)';
+
+      // 로컬 데이터 반영
+      if (!DATA.statuses[uitype]) DATA.statuses[uitype] = {};
+      DATA.statuses[uitype]['스크린샷URL'] = result.driveUrl;
+
+      // 스크린샷 입력 필드에도 반영
+      var ssInput = document.getElementById('edit-screenshot');
+      if (ssInput) ssInput.value = result.driveUrl;
+
+      // 모달 상단 스크린샷 갱신
+      var ssDiv = document.querySelector('.modal-screenshot');
+      if (ssDiv) {
+        var thumb = driveThumbUrl(result.driveUrl, 800);
+        ssDiv.innerHTML = '<img src="' + escHtml(thumb) + '" style="cursor:zoom-in" onclick="viewImage(this.src)">';
+      }
+    } else {
+      zone.classList.remove('uploading');
+      zone.innerHTML = '&#10060; 업로드 실패: ' + escHtml(result.error || '알 수 없는 오류');
+      zone.style.borderColor = 'var(--red)';
+      zone.style.color = 'var(--red)';
+    }
+  } catch(e) {
+    zone.classList.remove('uploading');
+    zone.innerHTML = '&#10060; 네트워크 오류: ' + escHtml(e.message);
+    zone.style.borderColor = 'var(--red)';
+    zone.style.color = 'var(--red)';
+  }
+}
+
+function blobToBase64(blob) {
+  return new Promise(function(resolve) {
+    var reader = new FileReader();
+    reader.onload = function() {
+      resolve(reader.result.split(',')[1]); // data:image/png;base64,... → base64 부분만
+    };
+    reader.readAsDataURL(blob);
+  });
+}
 
 async function saveStatus(uitype) {
   var msg = document.getElementById('edit-msg');
